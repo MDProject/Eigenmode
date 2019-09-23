@@ -1,0 +1,897 @@
+
+% keep the geometry of x direction and change the slip length
+clear all;
+L=250;
+H=17.48-1;
+T = 2.6;
+% L=13.5;
+% H=13.5;
+Nkx = 3*floor(33*L/17.48);%45; % kx index from 0 to 5(both ends included)
+Nkz = 4*floor(31*H/17.48);%45;
+ls=0;
+rho = 0.805;%5115/(L*(H+1)*T*8); 
+R = 0.41;
+eta = rho/R;
+kx=linspace(0,Nkx,Nkx+1)*pi/L;
+% slip length dispersion relation       x = kz*H
+ky=zeros(Nkx+1,Nkz);
+ky2=zeros(Nkx,Nkz);
+for k=1:1:Nkx+1 % kx index
+    func=@(x) kx(k)*H*tanh(kx(k)*H)+x*tan(x)+ls*H*(x^2/H/H+kx(k)^2);
+    for i=1:1:Nkz % kz index
+        x0=[i*pi];
+        options = optimoptions('fsolve','MaxIterations',500000,'MaxFunctionEvaluations',5000,'FunctionTolerance',10^(-40));
+        x=fsolve(func,x0,options);
+        ky(k,i)=x/H;
+    end
+    if k>=2
+        func=@(x) kx(k)*H/tanh(kx(k)*H)-x/tan(x)+ls*H*(x^2/H/H+kx(k)^2);
+        for i=1:1:Nkz % kz index
+            x0=[(i+0.5-1/3)*pi];
+            options = optimoptions('fsolve','MaxIterations',500000,'MaxFunctionEvaluations',5000,'FunctionTolerance',10^(-40));
+            x=fsolve(func,x0,options);
+            ky2(k-1,i)=x/H;
+        end
+    end
+end
+
+error1 = zeros(Nkx+1,Nkz);
+error2 = zeros(Nkx,Nkz);
+for k=1:1:Nkx+1 % kx index
+    for i=1:1:Nkz % kz index
+        func=@(x) kx(k)*H*tanh(kx(k)*H)+x*tan(x)+ls*H*(x^2/H/H+kx(k)^2);
+        x = ky(k,i)*H;
+        error1(k,i)=func(x);
+    end
+    if k>=2
+        for i=1:1:Nkz % kz index
+            func=@(x) kx(k)*H/tanh(kx(k)*H)-x/tan(x)+ls*H*(x^2/H/H+kx(k)^2);
+            x = ky2(k-1,i)*H;
+            error2(k-1,i)=func(x);
+        end
+    end
+end
+
+lambda = zeros(Nkx+1,Nkz);
+for i = 1:1:Nkx+1
+    for j = 1:1:Nkz
+        lambda(i,j) = (kx(i)*kx(i)+ky(i,j)*ky(i,j))/R;
+    end
+end
+lambda2 = zeros(Nkx,Nkz);
+for i = 1:1:Nkx
+    for j = 1:1:Nkz
+        lambda2(i,j) = (kx(i+1)*kx(i+1)+ky2(i,j)*ky2(i,j))/R;
+    end
+end
+kT = 3.5;
+lambdai1 = 1./lambda;
+lambdai2 = 1./lambda2;
+lambdai_vec1 = reshape(lambdai1,[(Nkx+1)*Nkz,1]);
+lambdai_vec2 = reshape(lambdai2,[(Nkx)*Nkz,1]);
+% sort two cases seperately
+[lambdai_vec1_decrease,Index1] = sort(lambdai_vec1,'descend');
+[lambdai_vec2_decrease,Index2] = sort(lambdai_vec2,'descend');
+% combine two cases
+% Neigen = 2*floor(5115/2/T);
+% Neigen = 2*floor(5115/(H+1)*L/2/T); % scaling the total atoms number; twice the number of atoms number
+Neigen = 2*floor(5115/2/T*L/17.48*H/17.48); 
+lambdai_vec_decrease = [];
+
+x = linspace(-L,L,30);
+z0 = [0,0.5,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16];
+cases = [];
+Kx = [];
+Kz = [];
+idx1 = 1;
+idx2 = 1;
+VX1=[];
+VZ1=[];
+for m = 1:1:length(x)
+	x0 = x(m);
+	for n =1:1:length(z0)
+		D = 0;
+		idx1 = 1;
+		idx2 = 1;
+		for i=1:1:Neigen
+			if lambdai_vec1_decrease(idx1)>lambdai_vec2_decrease(idx2)
+				lambdai_vec_decrease(i) = lambdai_vec1_decrease(idx1);
+				[kx_n,kz_n] = getEigenIndex(Index1(idx1),Nkz);
+				idx1 = idx1 + 1;
+				cases(i) = 1;
+				Kx(i) = kx_n*pi/L;
+				Kz(i) = ky(kx_n+1,kz_n);
+				% sum of D
+				kx1 = Kx(i);
+				kz1 = Kz(i);
+				velnorm2 = VelocityNorm2(kx1,kz1,H,L,ls);
+            			Cnorm2 = kT/rho/velnorm2;
+            			[vx,vz] = VelocityField(x0,z0(n),kx1,kz1,H,0); % rand*2*pi
+				if n == length(z0)
+					VX1(i) = vx; VZ1(i) = vz;
+				end
+            			vel2_pos = vx^2+vz^2; % velocity square at position (x0,z0)
+				D = D + 0.5*vel2_pos*Cnorm2*lambdai_vec_decrease(i);
+			else
+				lambdai_vec_decrease(i) = lambdai_vec2_decrease(idx2);
+				[kx_n,kz_n] = getEigenIndex_(Index2(idx2),Nkz);
+				idx2 = idx2 + 1;
+				cases(i) = 2;
+				Kx(i) = kx_n*pi/L;
+				Kz(i) = ky2(kx_n,kz_n);
+				% sum of D
+				kx2 = Kx(i);
+				kz2 = Kz(i);
+				velnorm2 = VelocityNorm2_(kx2,kz2,H,L,ls);
+            			Cnorm2 = kT/rho/velnorm2;
+            			[vx,vz] = VelocityField_(x0,z0(n),kx2,kz2,H,0); 
+            			vel2_pos = vx^2+vz^2; % velocity square at position (x0,z0)
+				D = D + 0.5*vel2_pos*Cnorm2*lambdai_vec_decrease(i);
+			end
+			D_sum(m,n,i) = D;
+		end
+	end
+end
+DeltaH = 0.5;
+Rho = rho *(1+((z0>H-DeltaH)|(z0<-H+DeltaH)).*cos(2*pi/4/DeltaH*(z0-(z0>=0&z0<=H).*H+(z0<0&z0>=-H).*H)));
+>> diffusion = mean(D_sum,1);
+>> diffusion_z_200 = diffusion(1,:,200);
+>> diffusion_z_400 = diffusion(1,:,400);
+>> diffusion_z_800 = diffusion(1,:,800);
+>> diffusion_z_1600 = diffusion(1,:,1600);
+>> diffusion_z_3200 = diffusion(1,:,3200);
+diffusion_z_4247 = diffusion(1,:,4247);
+plot(z0,diffusion_z_200.*rho./Rho ,'-or',z0,diffusion_z_400.*rho./Rho ,'-oy',z0,diffusion_z_800.*rho./Rho ,'-ob',z0,diffusion_z_1600.*rho./Rho ,'-og',z0,diffusion_z_4247.*rho./Rho,'-*k','linewidth',2.2);
+legend('n=200','n=400','n=800','n=1600','n=4247');
+set(gca,'fontsize', 50);xlabel({'$z\ coordinate\ with\ center\ of\ channel\ to\ be\ origin\ point\ (in\ unit\ of\ \sigma)$'},'fontsize',40,'Interpreter','latex');ylabel({'$Partial\ diffusion\ constant\ D_n(z)\ (in\ unit\ of\ \frac{\varepsilon}{m}\sigma)$'},'fontsize',32,'Interpreter','latex');
+mean(diffusion_z_4247(2:length(z0)-2));
+
+plot(z0,diffusion_z_200.*rho./Rho ,'-or')
+legend('n = 200')
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+
+% keep the geometry of x direction and change the slip length
+clear all;
+L=250;
+H=17.48-1;
+T = 2.6;
+% L=13.5;
+% H=13.5;
+Nkx = 3*floor(33*L/17.48);%45; % kx index from 0 to 5(both ends included)
+Nkz = 4*floor(31*H/17.48);%45;
+ls=0.6;
+rho = 0.805;%5115/(L*(H+1)*T*8); 
+R = 0.41;
+eta = rho/R;
+kx=linspace(0,Nkx,Nkx+1)*pi/L;
+% slip length dispersion relation       x = kz*H
+ky=zeros(Nkx+1,Nkz);
+ky2=zeros(Nkx,Nkz);
+for k=1:1:Nkx+1 % kx index
+    func=@(x) kx(k)*H*tanh(kx(k)*H)+x*tan(x)+ls*H*(x^2/H/H+kx(k)^2);
+    for i=1:1:Nkz % kz index
+        x0=[i*pi];
+        options = optimoptions('fsolve','MaxIterations',500000,'MaxFunctionEvaluations',5000,'FunctionTolerance',10^(-40));
+        x=fsolve(func,x0,options);
+        ky(k,i)=x/H;
+    end
+    if k>=2
+        func=@(x) kx(k)*H/tanh(kx(k)*H)-x/tan(x)+ls*H*(x^2/H/H+kx(k)^2);
+        for i=1:1:Nkz % kz index
+            x0=[(i+0.5-1/3)*pi];
+            options = optimoptions('fsolve','MaxIterations',500000,'MaxFunctionEvaluations',5000,'FunctionTolerance',10^(-40));
+            x=fsolve(func,x0,options);
+            ky2(k-1,i)=x/H;
+        end
+    end
+end
+
+error1 = zeros(Nkx+1,Nkz);
+error2 = zeros(Nkx,Nkz);
+for k=1:1:Nkx+1 % kx index
+    for i=1:1:Nkz % kz index
+        func=@(x) kx(k)*H*tanh(kx(k)*H)+x*tan(x)+ls*H*(x^2/H/H+kx(k)^2);
+        x = ky(k,i)*H;
+        error1(k,i)=func(x);
+    end
+    if k>=2
+        for i=1:1:Nkz % kz index
+            func=@(x) kx(k)*H/tanh(kx(k)*H)-x/tan(x)+ls*H*(x^2/H/H+kx(k)^2);
+            x = ky2(k-1,i)*H;
+            error2(k-1,i)=func(x);
+        end
+    end
+end
+
+lambda = zeros(Nkx+1,Nkz);
+for i = 1:1:Nkx+1
+    for j = 1:1:Nkz
+        lambda(i,j) = (kx(i)*kx(i)+ky(i,j)*ky(i,j))/R;
+    end
+end
+lambda2 = zeros(Nkx,Nkz);
+for i = 1:1:Nkx
+    for j = 1:1:Nkz
+        lambda2(i,j) = (kx(i+1)*kx(i+1)+ky2(i,j)*ky2(i,j))/R;
+    end
+end
+kT = 3.5;
+lambdai1 = 1./lambda;
+lambdai2 = 1./lambda2;
+lambdai_vec1 = reshape(lambdai1,[(Nkx+1)*Nkz,1]);
+lambdai_vec2 = reshape(lambdai2,[(Nkx)*Nkz,1]);
+% sort two cases seperately
+[lambdai_vec1_decrease,Index1] = sort(lambdai_vec1,'descend');
+[lambdai_vec2_decrease,Index2] = sort(lambdai_vec2,'descend');
+% combine two cases
+% Neigen = 2*floor(5115/2/T);
+% Neigen = 2*floor(5115/(H+1)*L/2/T); % scaling the total atoms number; twice the number of atoms number
+Neigen = 2*floor(5115/2/T*L/17.48*H/17.48); 
+lambdai_vec_decrease = [];
+
+x = linspace(-L,L,30);
+z0 = [0,0.5,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,16.4,H];
+cases = [];
+Kx = [];
+Kz = [];
+idx1 = 1;
+idx2 = 1;
+VX1=[];
+VZ1=[];
+for m = 1:1:length(x)
+	x0 = x(m);
+	for n =1:1:length(z0)
+		D = 0;
+		idx1 = 1;
+		idx2 = 1;
+		for i=1:1:Neigen
+			if lambdai_vec1_decrease(idx1)>lambdai_vec2_decrease(idx2)
+				lambdai_vec_decrease(i) = lambdai_vec1_decrease(idx1);
+				[kx_n,kz_n] = getEigenIndex(Index1(idx1),Nkz);
+				idx1 = idx1 + 1;
+				cases(i) = 1;
+				Kx(i) = kx_n*pi/L;
+				Kz(i) = ky(kx_n+1,kz_n);
+				% sum of D
+				kx1 = Kx(i);
+				kz1 = Kz(i);
+				velnorm2 = VelocityNorm2(kx1,kz1,H,L,ls);
+            			Cnorm2 = kT/rho/velnorm2;
+            			[vx,vz] = VelocityField(x0,z0(n),kx1,kz1,H,0); % rand*2*pi
+				if n == length(z0)
+					VX1(i) = vx; VZ1(i) = vz;
+				end
+            			vel2_pos = vx^2+vz^2; % velocity square at position (x0,z0)
+				D = D + 0.5*vel2_pos*Cnorm2*lambdai_vec_decrease(i);
+			else
+				lambdai_vec_decrease(i) = lambdai_vec2_decrease(idx2);
+				[kx_n,kz_n] = getEigenIndex_(Index2(idx2),Nkz);
+				idx2 = idx2 + 1;
+				cases(i) = 2;
+				Kx(i) = kx_n*pi/L;
+				Kz(i) = ky2(kx_n,kz_n);
+				% sum of D
+				kx2 = Kx(i);
+				kz2 = Kz(i);
+				velnorm2 = VelocityNorm2_(kx2,kz2,H,L,ls);
+            			Cnorm2 = kT/rho/velnorm2;
+            			[vx,vz] = VelocityField_(x0,z0(n),kx2,kz2,H,0); 
+            			vel2_pos = vx^2+vz^2; % velocity square at position (x0,z0)
+				D = D + 0.5*vel2_pos*Cnorm2*lambdai_vec_decrease(i);
+			end
+			D_sum(m,n,i) = D;
+		end
+	end
+end
+>> diffusion = mean(D_sum,1);
+>> diffusion_z_200 = diffusion(1,:,200);
+>> diffusion_z_400 = diffusion(1,:,400);
+>> diffusion_z_800 = diffusion(1,:,800);
+>> diffusion_z_1600 = diffusion(1,:,1600);
+>> diffusion_z_3200 = diffusion(1,:,3200);
+diffusion_z_4327 = diffusion(1,:,4327);
+plot(z0,diffusion_z_200 ,'or',z0,diffusion_z_400 ,'oy',z0,diffusion_z_800 ,'ob',z0,diffusion_z_1600 ,'og',z0,diffusion_z_3200 ,'oc',z0,diffusion_z_4327,'-*k');set(gca,'fontsize', 23);
+mean(diffusion_z_4327(2:length(z0)-2));
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+
+
+clear all;
+L=250;
+H=17.48-1;
+T = 2.6;
+% L=13.5;
+% H=13.5;
+Nkx = 3*floor(33*L/17.48);%45; % kx index from 0 to 5(both ends included)
+Nkz = 4*floor(31*H/17.48);%45;
+ls=0.2;
+rho = 0.805;%5115/(L*(H+1)*T*8); 
+R = 0.41;
+eta = rho/R;
+kx=linspace(0,Nkx,Nkx+1)*pi/L;
+% slip length dispersion relation       x = kz*H
+ky=zeros(Nkx+1,Nkz);
+ky2=zeros(Nkx,Nkz);
+for k=1:1:Nkx+1 % kx index
+    func=@(x) kx(k)*H*tanh(kx(k)*H)+x*tan(x)+ls*H*(x^2/H/H+kx(k)^2);
+    for i=1:1:Nkz % kz index
+        x0=[i*pi];
+        options = optimoptions('fsolve','MaxIterations',500000,'MaxFunctionEvaluations',5000,'FunctionTolerance',10^(-40));
+        x=fsolve(func,x0,options);
+        ky(k,i)=x/H;
+    end
+    if k>=2
+        func=@(x) kx(k)*H/tanh(kx(k)*H)-x/tan(x)+ls*H*(x^2/H/H+kx(k)^2);
+        for i=1:1:Nkz % kz index
+            x0=[(i+0.5-1/3)*pi];
+            options = optimoptions('fsolve','MaxIterations',500000,'MaxFunctionEvaluations',5000,'FunctionTolerance',10^(-40));
+            x=fsolve(func,x0,options);
+            ky2(k-1,i)=x/H;
+        end
+    end
+end
+
+error1 = zeros(Nkx+1,Nkz);
+error2 = zeros(Nkx,Nkz);
+for k=1:1:Nkx+1 % kx index
+    for i=1:1:Nkz % kz index
+        func=@(x) kx(k)*H*tanh(kx(k)*H)+x*tan(x)+ls*H*(x^2/H/H+kx(k)^2);
+        x = ky(k,i)*H;
+        error1(k,i)=func(x);
+    end
+    if k>=2
+        for i=1:1:Nkz % kz index
+            func=@(x) kx(k)*H/tanh(kx(k)*H)-x/tan(x)+ls*H*(x^2/H/H+kx(k)^2);
+            x = ky2(k-1,i)*H;
+            error2(k-1,i)=func(x);
+        end
+    end
+end
+
+lambda = zeros(Nkx+1,Nkz);
+for i = 1:1:Nkx+1
+    for j = 1:1:Nkz
+        lambda(i,j) = (kx(i)*kx(i)+ky(i,j)*ky(i,j))/R;
+    end
+end
+lambda2 = zeros(Nkx,Nkz);
+for i = 1:1:Nkx
+    for j = 1:1:Nkz
+        lambda2(i,j) = (kx(i+1)*kx(i+1)+ky2(i,j)*ky2(i,j))/R;
+    end
+end
+kT = 3.5;
+lambdai1 = 1./lambda;
+lambdai2 = 1./lambda2;
+lambdai_vec1 = reshape(lambdai1,[(Nkx+1)*Nkz,1]);
+lambdai_vec2 = reshape(lambdai2,[(Nkx)*Nkz,1]);
+% sort two cases seperately
+[lambdai_vec1_decrease,Index1] = sort(lambdai_vec1,'descend');
+[lambdai_vec2_decrease,Index2] = sort(lambdai_vec2,'descend');
+% combine two cases
+% Neigen = 2*floor(5115/2/T);
+% Neigen = 2*floor(5115/(H+1)*L/2/T); % scaling the total atoms number; twice the number of atoms number
+Neigen = 2*floor(5115/2/T*L/17.48*H/17.48); 
+lambdai_vec_decrease = [];
+
+x = linspace(-L,L,30);
+z0 = [0,0.5,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,16.4,H];
+cases = [];
+Kx = [];
+Kz = [];
+idx1 = 1;
+idx2 = 1;
+VX1=[];
+VZ1=[];
+for m = 1:1:length(x)
+	x0 = x(m);
+	for n =1:1:length(z0)
+		D = 0;
+		idx1 = 1;
+		idx2 = 1;
+		for i=1:1:Neigen
+			if lambdai_vec1_decrease(idx1)>lambdai_vec2_decrease(idx2)
+				lambdai_vec_decrease(i) = lambdai_vec1_decrease(idx1);
+				[kx_n,kz_n] = getEigenIndex(Index1(idx1),Nkz);
+				idx1 = idx1 + 1;
+				cases(i) = 1;
+				Kx(i) = kx_n*pi/L;
+				Kz(i) = ky(kx_n+1,kz_n);
+				% sum of D
+				kx1 = Kx(i);
+				kz1 = Kz(i);
+				velnorm2 = VelocityNorm2(kx1,kz1,H,L,ls);
+            			Cnorm2 = kT/rho/velnorm2;
+            			[vx,vz] = VelocityField(x0,z0(n),kx1,kz1,H,0); % rand*2*pi
+				if n == length(z0)
+					VX1(i) = vx; VZ1(i) = vz;
+				end
+            			vel2_pos = vx^2+vz^2; % velocity square at position (x0,z0)
+				D = D + 0.5*vel2_pos*Cnorm2*lambdai_vec_decrease(i);
+			else
+				lambdai_vec_decrease(i) = lambdai_vec2_decrease(idx2);
+				[kx_n,kz_n] = getEigenIndex_(Index2(idx2),Nkz);
+				idx2 = idx2 + 1;
+				cases(i) = 2;
+				Kx(i) = kx_n*pi/L;
+				Kz(i) = ky2(kx_n,kz_n);
+				% sum of D
+				kx2 = Kx(i);
+				kz2 = Kz(i);
+				velnorm2 = VelocityNorm2_(kx2,kz2,H,L,ls);
+            			Cnorm2 = kT/rho/velnorm2;
+            			[vx,vz] = VelocityField_(x0,z0(n),kx2,kz2,H,0); 
+            			vel2_pos = vx^2+vz^2; % velocity square at position (x0,z0)
+				D = D + 0.5*vel2_pos*Cnorm2*lambdai_vec_decrease(i);
+			end
+			D_sum(m,n,i) = D;
+		end
+	end
+end
+>> diffusion = mean(D_sum,1);
+>> diffusion_z_200 = diffusion(1,:,200);
+>> diffusion_z_400 = diffusion(1,:,400);
+>> diffusion_z_800 = diffusion(1,:,800);
+>> diffusion_z_1600 = diffusion(1,:,1600);
+>> diffusion_z_3200 = diffusion(1,:,3200);
+diffusion_z_4282 = diffusion(1,:,4282);
+plot(z0,diffusion_z_200 ,'or',z0,diffusion_z_400 ,'oy',z0,diffusion_z_800 ,'ob',z0,diffusion_z_1600 ,'og',z0,diffusion_z_3200 ,'oc',z0,diffusion_z_4282,'-*k');set(gca,'fontsize', 23);
+mean(diffusion_z_4282(2:length(z0)-2))
+
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+
+
+clear all;
+L=250;
+H=17.48-1;
+T = 2.6;
+% L=13.5;
+% H=13.5;
+Nkx = 3*floor(33*L/17.48);%45; % kx index from 0 to 5(both ends included)
+Nkz = 4*floor(31*H/17.48);%45;
+ls=0.1;
+rho = 0.805;%5115/(L*(H+1)*T*8); 
+R = 0.41;
+eta = rho/R;
+kx=linspace(0,Nkx,Nkx+1)*pi/L;
+% slip length dispersion relation       x = kz*H
+ky=zeros(Nkx+1,Nkz);
+ky2=zeros(Nkx,Nkz);
+for k=1:1:Nkx+1 % kx index
+    func=@(x) kx(k)*H*tanh(kx(k)*H)+x*tan(x)+ls*H*(x^2/H/H+kx(k)^2);
+    for i=1:1:Nkz % kz index
+        x0=[i*pi];
+        options = optimoptions('fsolve','MaxIterations',500000,'MaxFunctionEvaluations',5000,'FunctionTolerance',10^(-40));
+        x=fsolve(func,x0,options);
+        ky(k,i)=x/H;
+    end
+    if k>=2
+        func=@(x) kx(k)*H/tanh(kx(k)*H)-x/tan(x)+ls*H*(x^2/H/H+kx(k)^2);
+        for i=1:1:Nkz % kz index
+            x0=[(i+0.5-1/3)*pi];
+            options = optimoptions('fsolve','MaxIterations',500000,'MaxFunctionEvaluations',5000,'FunctionTolerance',10^(-40));
+            x=fsolve(func,x0,options);
+            ky2(k-1,i)=x/H;
+        end
+    end
+end
+
+error1 = zeros(Nkx+1,Nkz);
+error2 = zeros(Nkx,Nkz);
+for k=1:1:Nkx+1 % kx index
+    for i=1:1:Nkz % kz index
+        func=@(x) kx(k)*H*tanh(kx(k)*H)+x*tan(x)+ls*H*(x^2/H/H+kx(k)^2);
+        x = ky(k,i)*H;
+        error1(k,i)=func(x);
+    end
+    if k>=2
+        for i=1:1:Nkz % kz index
+            func=@(x) kx(k)*H/tanh(kx(k)*H)-x/tan(x)+ls*H*(x^2/H/H+kx(k)^2);
+            x = ky2(k-1,i)*H;
+            error2(k-1,i)=func(x);
+        end
+    end
+end
+
+lambda = zeros(Nkx+1,Nkz);
+for i = 1:1:Nkx+1
+    for j = 1:1:Nkz
+        lambda(i,j) = (kx(i)*kx(i)+ky(i,j)*ky(i,j))/R;	% anti-symmetric modes
+    end
+end
+lambda2 = zeros(Nkx,Nkz);
+for i = 1:1:Nkx
+    for j = 1:1:Nkz
+        lambda2(i,j) = (kx(i+1)*kx(i+1)+ky2(i,j)*ky2(i,j))/R;
+    end
+end
+kT = 3.5;
+lambdai1 = 1./lambda;
+lambdai2 = 1./lambda2;
+lambdai_vec1 = reshape(lambdai1,[(Nkx+1)*Nkz,1]);
+lambdai_vec2 = reshape(lambdai2,[(Nkx)*Nkz,1]);
+% sort two cases seperately
+[lambdai_vec1_decrease,Index1] = sort(lambdai_vec1,'descend');
+[lambdai_vec2_decrease,Index2] = sort(lambdai_vec2,'descend');
+% combine two cases
+% Neigen = 2*floor(5115/2/T);
+% Neigen = 2*floor(5115/(H+1)*L/2/T); % scaling the total atoms number; twice the number of atoms number
+Neigen = 2*floor(5115/2/T*L/17.48*H/17.48); 
+lambdai_vec_decrease = [];
+
+x = linspace(-L,L,30);
+z0 = [0,0.5,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,16.4,H];
+cases = [];
+Kx = [];
+Kz = [];
+idx1 = 1;
+idx2 = 1;
+VX1=[];
+VZ1=[];
+for m = 1:1:length(x)
+	x0 = x(m);
+	for n =1:1:length(z0)
+		D = 0;
+		idx1 = 1;
+		idx2 = 1;
+		for i=1:1:Neigen
+			if lambdai_vec1_decrease(idx1)>lambdai_vec2_decrease(idx2)
+				lambdai_vec_decrease(i) = lambdai_vec1_decrease(idx1);
+				[kx_n,kz_n] = getEigenIndex(Index1(idx1),Nkz);
+				idx1 = idx1 + 1;
+				cases(i) = 1;
+				Kx(i) = kx_n*pi/L;
+				Kz(i) = ky(kx_n+1,kz_n);
+				% sum of D
+				kx1 = Kx(i);
+				kz1 = Kz(i);
+				velnorm2 = VelocityNorm2(kx1,kz1,H,L,ls);
+            			Cnorm2 = kT/rho/velnorm2;
+            			[vx,vz] = VelocityField(x0,z0(n),kx1,kz1,H,0); % rand*2*pi
+				if n == length(z0)
+					VX1(i) = vx; VZ1(i) = vz;
+				end
+            			vel2_pos = vx^2+vz^2; % velocity square at position (x0,z0)
+				D = D + 0.5*vel2_pos*Cnorm2*lambdai_vec_decrease(i);
+			else
+				lambdai_vec_decrease(i) = lambdai_vec2_decrease(idx2);
+				[kx_n,kz_n] = getEigenIndex_(Index2(idx2),Nkz);
+				idx2 = idx2 + 1;
+				cases(i) = 2;
+				Kx(i) = kx_n*pi/L;
+				Kz(i) = ky2(kx_n,kz_n);
+				% sum of D
+				kx2 = Kx(i);
+				kz2 = Kz(i);
+				velnorm2 = VelocityNorm2_(kx2,kz2,H,L,ls);
+            			Cnorm2 = kT/rho/velnorm2;
+            			[vx,vz] = VelocityField_(x0,z0(n),kx2,kz2,H,0); 
+            			vel2_pos = vx^2+vz^2; % velocity square at position (x0,z0)
+				D = D + 0.5*vel2_pos*Cnorm2*lambdai_vec_decrease(i);
+			end
+			D_sum(m,n,i) = D;
+		end
+	end
+end
+>> diffusion = mean(D_sum,1);
+>> diffusion_z_200 = diffusion(1,:,200);
+>> diffusion_z_400 = diffusion(1,:,400);
+>> diffusion_z_800 = diffusion(1,:,800);
+>> diffusion_z_1600 = diffusion(1,:,1600);
+>> diffusion_z_3200 = diffusion(1,:,3200);
+diffusion_z_4270 = diffusion(1,:,4270);
+plot(z0,diffusion_z_200 ,'or',z0,diffusion_z_400 ,'oy',z0,diffusion_z_800 ,'ob',z0,diffusion_z_1600 ,'og',z0,diffusion_z_3200 ,'oc',z0,diffusion_z_4270,'-*k');set(gca,'fontsize', 23);
+mean(diffusion_z_4270(2:length(z0)-2))
+
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+
+
+clear all;
+L=250;
+H=17.48-1;
+T = 2.6;
+% L=13.5;
+% H=13.5;
+Nkx = 3*floor(33*L/17.48);%45; % kx index from 0 to 5(both ends included)
+Nkz = 4*floor(31*H/17.48);%45;
+ls=1.2;
+rho = 0.805;%5115/(L*(H+1)*T*8); 
+R = 0.41;
+eta = rho/R;
+kx=linspace(0,Nkx,Nkx+1)*pi/L;
+% slip length dispersion relation       x = kz*H
+ky=zeros(Nkx+1,Nkz);
+ky2=zeros(Nkx,Nkz);
+for k=1:1:Nkx+1 % kx index
+    func=@(x) kx(k)*H*tanh(kx(k)*H)+x*tan(x)+ls*H*(x^2/H/H+kx(k)^2);
+    for i=1:1:Nkz % kz index
+        x0=[i*pi];
+        options = optimoptions('fsolve','MaxIterations',500000,'MaxFunctionEvaluations',5000,'FunctionTolerance',10^(-40));
+        x=fsolve(func,x0,options);
+        ky(k,i)=x/H;
+    end
+    if k>=2
+        func=@(x) kx(k)*H/tanh(kx(k)*H)-x/tan(x)+ls*H*(x^2/H/H+kx(k)^2);
+        for i=1:1:Nkz % kz index
+            x0=[(i+0.5-1/3)*pi];
+            options = optimoptions('fsolve','MaxIterations',500000,'MaxFunctionEvaluations',5000,'FunctionTolerance',10^(-40));
+            x=fsolve(func,x0,options);
+            ky2(k-1,i)=x/H;
+        end
+    end
+end
+
+error1 = zeros(Nkx+1,Nkz);
+error2 = zeros(Nkx,Nkz);
+for k=1:1:Nkx+1 % kx index
+    for i=1:1:Nkz % kz index
+        func=@(x) kx(k)*H*tanh(kx(k)*H)+x*tan(x)+ls*H*(x^2/H/H+kx(k)^2);
+        x = ky(k,i)*H;
+        error1(k,i)=func(x);
+    end
+    if k>=2
+        for i=1:1:Nkz % kz index
+            func=@(x) kx(k)*H/tanh(kx(k)*H)-x/tan(x)+ls*H*(x^2/H/H+kx(k)^2);
+            x = ky2(k-1,i)*H;
+            error2(k-1,i)=func(x);
+        end
+    end
+end
+
+lambda = zeros(Nkx+1,Nkz);
+for i = 1:1:Nkx+1
+    for j = 1:1:Nkz
+        lambda(i,j) = (kx(i)*kx(i)+ky(i,j)*ky(i,j))/R;	% anti-symmetric modes
+    end
+end
+lambda2 = zeros(Nkx,Nkz);
+for i = 1:1:Nkx
+    for j = 1:1:Nkz
+        lambda2(i,j) = (kx(i+1)*kx(i+1)+ky2(i,j)*ky2(i,j))/R;
+    end
+end
+kT = 3.5;
+lambdai1 = 1./lambda;
+lambdai2 = 1./lambda2;
+lambdai_vec1 = reshape(lambdai1,[(Nkx+1)*Nkz,1]);
+lambdai_vec2 = reshape(lambdai2,[(Nkx)*Nkz,1]);
+% sort two cases seperately
+[lambdai_vec1_decrease,Index1] = sort(lambdai_vec1,'descend');
+[lambdai_vec2_decrease,Index2] = sort(lambdai_vec2,'descend');
+% combine two cases
+% Neigen = 2*floor(5115/2/T);
+% Neigen = 2*floor(5115/(H+1)*L/2/T); % scaling the total atoms number; twice the number of atoms number
+Neigen = 2*floor(5115/2/T*L/17.48*H/17.48); 
+lambdai_vec_decrease = [];
+
+x = linspace(-L,L,30);
+z0 = [0,0.5,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,16.4,H];
+cases = [];
+Kx = [];
+Kz = [];
+idx1 = 1;
+idx2 = 1;
+VX1=[];
+VZ1=[];
+for m = 1:1:length(x)
+	x0 = x(m);
+	for n =1:1:length(z0)
+		D = 0;
+		idx1 = 1;
+		idx2 = 1;
+		for i=1:1:Neigen
+			if lambdai_vec1_decrease(idx1)>lambdai_vec2_decrease(idx2)
+				lambdai_vec_decrease(i) = lambdai_vec1_decrease(idx1);
+				[kx_n,kz_n] = getEigenIndex(Index1(idx1),Nkz);
+				idx1 = idx1 + 1;
+				cases(i) = 1;
+				Kx(i) = kx_n*pi/L;
+				Kz(i) = ky(kx_n+1,kz_n);
+				% sum of D
+				kx1 = Kx(i);
+				kz1 = Kz(i);
+				velnorm2 = VelocityNorm2(kx1,kz1,H,L,ls);
+            			Cnorm2 = kT/rho/velnorm2;
+            			[vx,vz] = VelocityField(x0,z0(n),kx1,kz1,H,0); % rand*2*pi
+				if n == length(z0)
+					VX1(i) = vx; VZ1(i) = vz;
+				end
+            			vel2_pos = vx^2+vz^2; % velocity square at position (x0,z0)
+				D = D + 0.5*vel2_pos*Cnorm2*lambdai_vec_decrease(i);
+			else
+				lambdai_vec_decrease(i) = lambdai_vec2_decrease(idx2);
+				[kx_n,kz_n] = getEigenIndex_(Index2(idx2),Nkz);
+				idx2 = idx2 + 1;
+				cases(i) = 2;
+				Kx(i) = kx_n*pi/L;
+				Kz(i) = ky2(kx_n,kz_n);
+				% sum of D
+				kx2 = Kx(i);
+				kz2 = Kz(i);
+				velnorm2 = VelocityNorm2_(kx2,kz2,H,L,ls);
+            			Cnorm2 = kT/rho/velnorm2;
+            			[vx,vz] = VelocityField_(x0,z0(n),kx2,kz2,H,0); 
+            			vel2_pos = vx^2+vz^2; % velocity square at position (x0,z0)
+				D = D + 0.5*vel2_pos*Cnorm2*lambdai_vec_decrease(i);
+			end
+			D_sum(m,n,i) = D;
+		end
+	end
+end
+>> diffusion = mean(D_sum,1);
+>> diffusion_z_200 = diffusion(1,:,200);
+>> diffusion_z_400 = diffusion(1,:,400);
+>> diffusion_z_800 = diffusion(1,:,800);
+>> diffusion_z_1600 = diffusion(1,:,1600);
+>> diffusion_z_3200 = diffusion(1,:,3200);
+diffusion_z_4352 = diffusion(1,:,4352);
+plot(z0,diffusion_z_200 ,'or',z0,diffusion_z_400 ,'oy',z0,diffusion_z_800 ,'ob',z0,diffusion_z_1600 ,'og',z0,diffusion_z_3200 ,'oc',z0,diffusion_z_4352,'-*k');set(gca,'fontsize', 23);
+mean(diffusion_z_4352(2:length(z0)-2))
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+
+
+clear all;
+L=250;
+H=17.48-1;
+T = 2.6;
+% L=13.5;
+% H=13.5;
+Nkx = 3*floor(33*L/17.48);%45; % kx index from 0 to 5(both ends included)
+Nkz = 4*floor(31*H/17.48);%45;
+ls=1.2;
+rho = 0.805;%5115/(L*(H+1)*T*8); 
+R = 0.41;
+eta = rho/R;
+kx=linspace(0,Nkx,Nkx+1)*pi/L;
+% slip length dispersion relation       x = kz*H
+ky=zeros(Nkx+1,Nkz);
+ky2=zeros(Nkx,Nkz);
+for k=1:1:Nkx+1 % kx index
+    func=@(x) kx(k)*H*tanh(kx(k)*H)+x*tan(x)+ls*H*(x^2/H/H+kx(k)^2);
+    for i=1:1:Nkz % kz index
+        x0=[i*pi];
+        options = optimoptions('fsolve','MaxIterations',500000,'MaxFunctionEvaluations',5000,'FunctionTolerance',10^(-40));
+        x=fsolve(func,x0,options);
+        ky(k,i)=x/H;
+    end
+    if k>=2
+        func=@(x) kx(k)*H/tanh(kx(k)*H)-x/tan(x)+ls*H*(x^2/H/H+kx(k)^2);
+        for i=1:1:Nkz % kz index
+            x0=[(i+0.5-1/3)*pi];
+            options = optimoptions('fsolve','MaxIterations',500000,'MaxFunctionEvaluations',5000,'FunctionTolerance',10^(-40));
+            x=fsolve(func,x0,options);
+            ky2(k-1,i)=x/H;
+        end
+    end
+end
+
+error1 = zeros(Nkx+1,Nkz);
+error2 = zeros(Nkx,Nkz);
+for k=1:1:Nkx+1 % kx index
+    for i=1:1:Nkz % kz index
+        func=@(x) kx(k)*H*tanh(kx(k)*H)+x*tan(x)+ls*H*(x^2/H/H+kx(k)^2);
+        x = ky(k,i)*H;
+        error1(k,i)=func(x);
+    end
+    if k>=2
+        for i=1:1:Nkz % kz index
+            func=@(x) kx(k)*H/tanh(kx(k)*H)-x/tan(x)+ls*H*(x^2/H/H+kx(k)^2);
+            x = ky2(k-1,i)*H;
+            error2(k-1,i)=func(x);
+        end
+    end
+end
+
+lambda = zeros(Nkx+1,Nkz);
+for i = 1:1:Nkx+1
+    for j = 1:1:Nkz
+        lambda(i,j) = (kx(i)*kx(i)+ky(i,j)*ky(i,j))/R;	% anti-symmetric modes
+    end
+end
+lambda2 = zeros(Nkx,Nkz);
+for i = 1:1:Nkx
+    for j = 1:1:Nkz
+        lambda2(i,j) = (kx(i+1)*kx(i+1)+ky2(i,j)*ky2(i,j))/R;
+    end
+end
+kT = 3.5;
+lambdai1 = 1./lambda;
+lambdai2 = 1./lambda2;
+lambdai_vec1 = reshape(lambdai1,[(Nkx+1)*Nkz,1]);
+lambdai_vec2 = reshape(lambdai2,[(Nkx)*Nkz,1]);
+% sort two cases seperately
+[lambdai_vec1_decrease,Index1] = sort(lambdai_vec1,'descend');
+[lambdai_vec2_decrease,Index2] = sort(lambdai_vec2,'descend');
+% combine two cases
+% Neigen = 2*floor(5115/2/T);
+% Neigen = 2*floor(5115/(H+1)*L/2/T); % scaling the total atoms number; twice the number of atoms number
+Neigen = 2*floor(5115/2/T*L/17.48*H/17.48); 
+lambdai_vec_decrease = [];
+
+x = linspace(-L,L,30);
+z0 = [0,0.5,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,16.4,H];
+cases = [];
+Kx = [];
+Kz = [];
+idx1 = 1;
+idx2 = 1;
+VX1=[];
+VZ1=[];
+for m = 1:1:length(x)
+	x0 = x(m);
+	for n =1:1:length(z0)
+		D = 0;
+		idx1 = 1;
+		idx2 = 1;
+		for i=1:1:Neigen
+			if lambdai_vec1_decrease(idx1)>lambdai_vec2_decrease(idx2)
+				lambdai_vec_decrease(i) = lambdai_vec1_decrease(idx1);
+				[kx_n,kz_n] = getEigenIndex(Index1(idx1),Nkz);
+				idx1 = idx1 + 1;
+				cases(i) = 1;
+				Kx(i) = kx_n*pi/L;
+				Kz(i) = ky(kx_n+1,kz_n);
+				% sum of D
+				kx1 = Kx(i);
+				kz1 = Kz(i);
+				velnorm2 = VelocityNorm2(kx1,kz1,H,L,ls);
+            			Cnorm2 = kT/rho/velnorm2;
+            			[vx,vz] = VelocityField(x0,z0(n),kx1,kz1,H,0); % rand*2*pi
+				if n == length(z0)
+					VX1(i) = vx; VZ1(i) = vz;
+				end
+            			vel2_pos = vx^2+vz^2; % velocity square at position (x0,z0)
+				D = D + 0.5*vel2_pos*Cnorm2*lambdai_vec_decrease(i);
+			else
+				lambdai_vec_decrease(i) = lambdai_vec2_decrease(idx2);
+				[kx_n,kz_n] = getEigenIndex_(Index2(idx2),Nkz);
+				idx2 = idx2 + 1;
+				cases(i) = 2;
+				Kx(i) = kx_n*pi/L;
+				Kz(i) = ky2(kx_n,kz_n);
+				% sum of D
+				kx2 = Kx(i);
+				kz2 = Kz(i);
+				velnorm2 = VelocityNorm2_(kx2,kz2,H,L,ls);
+            			Cnorm2 = kT/rho/velnorm2;
+            			[vx,vz] = VelocityField_(x0,z0(n),kx2,kz2,H,0); 
+            			vel2_pos = vx^2+vz^2; % velocity square at position (x0,z0)
+				D = D + 0.5*vel2_pos*Cnorm2*lambdai_vec_decrease(i);
+			end
+			D_sum(m,n,i) = D;
+		end
+	end
+end
+>> diffusion = mean(D_sum,1);
+>> diffusion_z_200 = diffusion(1,:,200);
+>> diffusion_z_400 = diffusion(1,:,400);
+>> diffusion_z_800 = diffusion(1,:,800);
+>> diffusion_z_1600 = diffusion(1,:,1600);
+>> diffusion_z_3200 = diffusion(1,:,3200);
+diffusion_z_4575 = diffusion(1,:,4575);
+plot(z0,diffusion_z_200 ,'or',z0,diffusion_z_400 ,'oy',z0,diffusion_z_800 ,'ob',z0,diffusion_z_1600 ,'og',z0,diffusion_z_3200 ,'oc',z0,diffusion_z_4575,'-*k');set(gca,'fontsize', 23);
+mean(diffusion_z_4575(2:length(z0)-2))
+
+
+
+% verifying the slip length using the eigenvector
+% I	anti-symmetric modes
+for n = 1:1:length(kx)
+	lbda = -kx(n)./(kx(n)*kx(n)+ky(n,:).*ky(n,:)).*cos(ky(n,:)*H)/cosh(kx(n)*H); % return a vector
+	pdvxpdy_H = lbda*kx(n)*cosh(kx(n)*H) - ky(n,:).*ky(n,:)./(kx(n)*kx(n)+ky(n,:).*ky(n,:)).*cos(ky(n,:)*H);
+	vx_H = lbda.*sinh(kx(n)*H) - ky(n,:)./(kx(n)*kx(n)+ky(n,:).*ky(n,:)).*sin(ky(n,:)*H);
+	ls_test(n,:) = -vx_H./pdvxpdy_H;
+end
+plot(linspace(1,length(lbda),length(lbda)),ls_test(1,:),'or',linspace(1,length(lbda),length(lbda)),ls_test(floor(length(kx)/5),:),'ob',linspace(1,length(lbda),length(lbda)),ls_test(floor(2*length(kx)/5),:),'oc',linspace(1,length(lbda),length(lbda)),ls_test(floor(3*length(kx)/5),:),'ok');set(gca,'fontsize', 23);
